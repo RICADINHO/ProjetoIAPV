@@ -1,14 +1,22 @@
 import argparse
 import pickle
-import gym
-import seals  # biblioteca para ambientes imitation
+
+#import seals  # biblioteca para ambientes imitation
 from stable_baselines3 import PPO
 from imitation.algorithms.bc import BC
 from imitation.algorithms.adversarial.gail import GAIL
 from imitation.data.types import Transitions
 from imitation.data import rollout
 
+import numpy as np
+import gymnasium as gym
+from imitation.policies.serialize import load_policy
+from imitation.util.util import make_vec_env
+from imitation.data.wrappers import RolloutInfoWrapper
+
 def main():
+
+    # Argumento de entrada
     parser = argparse.ArgumentParser(description="Treino por Aprendizagem por Imitação")
     parser.add_argument("--file", type=str, required=True, help="Ficheiro com demonstrações (pkl)")
     parser.add_argument("--gym", type=str, required=True, choices=["CartPole", "Custom"], help="Nome do ginásio")
@@ -16,48 +24,64 @@ def main():
     parser.add_argument("--output", type=str, required=True, help="Ficheiro de output da política treinada")
     args = parser.parse_args()
 
-    # Carregar demonstrações
-    with open(args.file, "rb") as f:
-        demos = pickle.load(f)
+    """ 
+    Selecionar o tipo de ambiente (CartPole ou Custom)
+    Criar o ambiente
+    Descarregar as demonstrações do expert
+    Treino da policy e guarda no ficherio output
+    """
 
-    # Converter para formato Transitions (se necessário)
-    transitions = Transitions(
-        obs=demos["obs"],
-        acts=demos["acts"],
-        infos=demos.get("infos", [{}] * len(demos["obs"])),
-        next_obs=demos["next_obs"],
-        dones=demos["dones"],
+    # Selecionar o tipo de ambiente
+    def get_ambiente():
+        if args.gym == "CartPole":
+            return "seals/CartPole-v0"
+        else:
+            # Placeholder para ambiente customizado
+            return "Custom"  # substitua pelo seu ambiente custom
+   
+    type_env = get_ambiente
+
+    # Carregar o ambiente (no GAIL, adicionar n_envs=8,)
+    env = make_vec_env(
+        "seals:"+type_env,
+        rng=np.random.default_rng(),
+        post_wrappers=[
+            lambda env, _: RolloutInfoWrapper(env)
+        ],  # needed for computing rollouts later
     )
 
-    # Selecionar ambiente
-    if args.gym == "CartPole":
-        env = gym.make("seals/CartPole-v0")
-    else:
-        # Placeholder para ambiente customizado
-        env = gym.make("CartPole-v1")  # substitua pelo seu ambiente custom
-    
+    # Descarregar as demonstrações (para ambos os algoritmos)
+    expert = load_policy(
+        env_name=type_env,
+        venv=env,
+        path=args.file
+    )
+
+    # Para o GAIL, adicionar seed no rng = 42 e min_episodes = 60
+    rng = np.random.default_rng()
+    rollouts = rollout.rollout(
+        expert,
+        env,
+        rollout.make_sample_until(min_timesteps=None, min_episodes=50),
+        rng=rng,
+    )
+
     # Selecionar algoritmo
     def select_algorithm_for_imitation():
         
         if args.algorithm == "BC":
-            # Treino para BC
-            # https://imitation.readthedocs.io/en/latest/tutorials/1_train_bc.html 
-
+            
             bc_trainer = BC(
                 observation_space=env.observation_space,
                 action_space=env.action_space,
-                demonstrations=transitions)
+                demonstrations=rollout.flatten_trajectories(rollouts),
+                rng=rng)
             
             bc_trainer.train(n_epochs=10)
             bc_trainer.policy.save(args.output)
             
-            return bc_trainer
 
         elif args.algorithm == "GAIL":
-            # Política base (PPO)
-            
-            # Treino para GAIL
-            # https://imitation.readthedocs.io/en/latest/tutorials/3_train_gail.html
 
             policy = PPO("MlpPolicy", env, verbose=1)
 
@@ -73,8 +97,7 @@ def main():
             
             return policy
 
-    new_policy = select_algorithm_for_imitation()
-    # Treina uma policy P para aproximar D (Demonstrações), utilizando A (Algoritmo) em G (nome do ginásio); 
+    select_algorithm_for_imitation()
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,6 @@
 import argparse
 import pickle
-import gym
+import gymnasium as gym
 import seals  # biblioteca para ambientes imitation
 import numpy as np
 from stable_baselines3 import PPO
