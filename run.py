@@ -1,5 +1,5 @@
 import argparse
-import gym
+import gymnasium as gym
 import seals  # biblioteca para ambientes imitation
 from stable_baselines3 import PPO
 
