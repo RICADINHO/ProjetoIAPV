@@ -1,10 +1,7 @@
-import argparse
-
-# biblioteca para ambientes imitation
-# import seals 
-
+import argparse 
 import numpy as np
-import gymnasium as gym
+
+# import custom_enviornment # Biblioteca com um novo ambiente
 
 from imitation.data import rollout
 from imitation.util.util import make_vec_env
@@ -35,12 +32,14 @@ def main():
         if type_gym == "CartPole":
             return "seals/CartPole-v0"
         else:
-            return "Custom"
+            # Com o mesmo id que foi usado para o registo do custom
+            return "custom/custom_enviornment" 
 
     def load_env(seed, type_env, type_algorithm):
+
         if type_algorithm == "BC":
             return make_vec_env(
-                "seals:" + type_env,
+                type_env,
                 rng=np.random.default_rng(seed),
                 post_wrappers=[
                     lambda env, _: RolloutInfoWrapper(env)
@@ -49,12 +48,12 @@ def main():
 
         elif type_algorithm == "GAIL":
             return make_vec_env(
-            "seals:"+type_env,
-            rng=np.random.default_rng(seed),
-            n_envs=8,
-            post_wrappers=[
-                lambda env, _: RolloutInfoWrapper(env)
-            ],  # needed for computing rollouts later
+                type_env,
+                rng=np.random.default_rng(seed),
+                n_envs=8,
+                post_wrappers=[
+                    lambda env, _: RolloutInfoWrapper(env)
+                ],  # needed for computing rollouts later
         )
         else:
             return None
@@ -74,12 +73,10 @@ def main():
     # Carregar o ambiente (no GAIL, adicionar n_envs=8,)
     env = load_env(SEED, type_env, args.algorithm)
 
-    # Criar condição caso receba None
-
     # Descarregar as demonstrações (para ambos os algoritmos)
     #expert = load_policy(env_name=type_env, venv=env, path=args.file)
     
-    # Teste da policy 
+    # Teste da policy (Mudar quando tiver o ambiente custom)
     expert = load_policy(
         "ppo-huggingface",
         organization="HumanCompatibleAI",

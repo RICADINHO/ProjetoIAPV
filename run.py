@@ -9,18 +9,25 @@ def main():
     parser.add_argument("--gym", type=str, required=True, choices=["CartPole", "Custom"], help="Nome do ginásio")
     args = parser.parse_args()
 
+    """
+    Receber ficheiro com a policy e o nome do ambiente que foi treinado a policy
+    Abrir o ambiente em mode de visualização
+    Executa Policy no ambiente passo a passo ou em modo contínuo, de acordo com a 
+    escolha do utilizador e enquanto o pretender
+    """
+
     # Selecionar ambiente
     if args.gym == "CartPole":
         env = gym.make("seals/CartPole-v0")
     else:
         # Placeholder para ambiente customizado
-        env = gym.make("CartPole-v1")  # substitua pelo seu ambiente custom
+        env = gym.make("Custom")  # substitua pelo seu ambiente custom
 
+    # Melhorar
     # Carregar policy
     model = PPO.load(args.policy)
 
     # Executar episódios
-
     num_episodios = 5
 
     for ep in range(num_episodios):  # correr n episódios

@@ -2,7 +2,7 @@
 
 Biblioteca necessarias para funcionamento:
 
-pip install gymnasium -> Para a utilização do ambiente
+pip install gymnasium -> Para a criação de um novo ambiente (gym)
 
 pip install stable-baselines3 -> Para a policy no GAIL
 
