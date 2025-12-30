@@ -14,7 +14,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.ppo import MlpPolicy
 from imitation.util.networks import RunningNorm
 from imitation.rewards.reward_nets import BasicRewardNet
-
+from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.evaluation import evaluate_policy
 
 
@@ -30,7 +30,7 @@ def main():
 
     def get_ambiente(type_gym):
         if type_gym == "CartPole":
-            return "seals/CartPole-v0"
+            return "seals:seals/CartPole-v0"
         else:
             # Com o mesmo id que foi usado para o registo do custom
             return "custom/custom_enviornment" 
@@ -112,16 +112,20 @@ def main():
             demonstrations=rollout.flatten_trajectories(rollouts),
             rng=rng)
         
-        reward_before_training, _ = evaluate_policy(bc_trainer.policy, env, 10)
+        reward_before_training, _ = evaluate_policy(bc_trainer.policy, env, 5)
 
-        bc_trainer.train(n_epochs=10)
+        bc_trainer.train(n_epochs=5)
                 
-        reward_after_training, _ = evaluate_policy(bc_trainer.policy, env, 10)
+        reward_after_training, _ = evaluate_policy(bc_trainer.policy, env, 5)
 
         print(f"Reward before training: {reward_before_training}")
         print(f"Reward after training: {reward_after_training}")
 
-        bc_trainer.policy.save(args.output)
+        save_policy = PPO( policy=bc_trainer.policy.__class__, env=env, verbose=0, ) 
+        save_policy.policy.load_state_dict(bc_trainer.policy.state_dict()) 
+        save_policy.save(args.output)
+        
+        env.close()
         
     elif args.algorithm == "GAIL":
         
@@ -172,6 +176,7 @@ def main():
             "Rewards after training:", np.mean(learner_rewards_after_training),
             "+/-", np.std(learner_rewards_after_training),
         )
+        env.close()
             
 if __name__ == "__main__":
     main()

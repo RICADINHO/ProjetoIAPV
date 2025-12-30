@@ -1,7 +1,8 @@
 import argparse
 import gymnasium as gym
-import seals  # biblioteca para ambientes imitation
+import seals
 from stable_baselines3 import PPO
+
 
 def main():
     parser = argparse.ArgumentParser(description="Executar uma policy treinada")
@@ -9,39 +10,60 @@ def main():
     parser.add_argument("--gym", type=str, required=True, choices=["CartPole", "Custom"], help="Nome do ginásio")
     args = parser.parse_args()
 
-    """
-    Receber ficheiro com a policy e o nome do ambiente que foi treinado a policy
-    Abrir o ambiente em mode de visualização
-    Executa Policy no ambiente passo a passo ou em modo contínuo, de acordo com a 
-    escolha do utilizador e enquanto o pretender
-    """
-
     # Selecionar ambiente
     if args.gym == "CartPole":
-        env = gym.make("seals/CartPole-v0")
+        env = gym.make("seals:seals/CartPole-v0", render_mode="human")
     else:
-        # Placeholder para ambiente customizado
-        env = gym.make("Custom")  # substitua pelo seu ambiente custom
+        env = gym.make("Custom", render_mode="human")  # substitui pelo teu ID real
 
-    # Melhorar
     # Carregar policy
     model = PPO.load(args.policy)
 
-    # Executar episódios
-    num_episodios = 5
+    # Escolha do utilizador: step-by-step ou contínuo
+    mode = input("Modo de execução ([c]ontínuo / [s]tep-by-step)? ").strip().lower()
+    if mode not in ["c", "s"]:
+        print("Opção inválida. A usar modo contínuo por defeito.")
+        mode = "c"
 
-    for ep in range(num_episodios):  # correr n episódios
-        obs = env.reset()
-        done = False
+    continuar = True
+    episodio = 0
+
+    while continuar:
+        episodio += 1
+        obs, info = env.reset()
+        terminated = False
+        truncated = False
         total_reward = 0
-        while not done:
+
+        print(f"\n--- Episódio {episodio} ---")
+
+        while not (terminated or truncated):
             action, _ = model.predict(obs, deterministic=True)
-            obs, reward, done, info = env.step(action)
+            obs, reward, terminated, truncated, info = env.step(action)
             env.render()
             total_reward += reward
-        print(f"Episódio {ep+1} terminado com recompensa total: {total_reward}")
+
+            if mode == "s":
+                cmd = input("Enter = próximo passo, 'q' = sair deste episódio, 'x' = terminar programa: ").strip().lower()
+                if cmd == "x":
+                    continuar = False
+                    break
+                elif cmd == "q":
+                    break
+                # qualquer outra tecla ou Enter continua passo a passo
+
+        print(f"Episódio {episodio} terminado com recompensa total: {total_reward}")
+
+        if not continuar:
+            break
+
+        if mode == "c":
+            resp = input("Continuar? (Enter = sim, 'n' = não): ").strip().lower()
+            if resp == "n":
+                continuar = False
 
     env.close()
+
 
 if __name__ == "__main__":
     main()
