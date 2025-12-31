@@ -44,6 +44,7 @@ def main():
             total_reward += reward
 
             if mode == "s":
+                
                 cmd = input("Enter = próximo passo, 'q' = sair deste episódio, 'x' = terminar programa: ").strip().lower()
                 if cmd == "x":
                     continuar = False
