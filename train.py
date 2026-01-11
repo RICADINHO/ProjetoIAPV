@@ -47,6 +47,9 @@ def main():
             )
 
         elif type_algorithm == "GAIL":
+
+            # n_envs -> Numero de copias do ambiente para acelarar o treino
+
             return make_vec_env(
                 type_env,
                 rng=np.random.default_rng(seed),
@@ -85,6 +88,7 @@ def main():
     )
 
     if args.algorithm == "BC":
+        # Avaliar a policy através dos dados do expert, dentro de um ambiente env, por 10 episodios
         reward, _ = evaluate_policy(expert, env, 10)
         print(reward)
 
