@@ -1,7 +1,7 @@
-import argparse 
+import argparse
 import numpy as np
-
-# import custom_enviornment # Biblioteca com um novo ambiente
+import torch
+import gymnasium as gym
 
 from imitation.data import rollout
 from imitation.util.util import make_vec_env
@@ -14,12 +14,103 @@ from stable_baselines3 import PPO
 from stable_baselines3.ppo import MlpPolicy
 from imitation.util.networks import RunningNorm
 from imitation.rewards.reward_nets import BasicRewardNet
-from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.evaluation import evaluate_policy
 
+import custom
+import pickle
+from imitation.data import types
+from imitation.data import rollout as rollout_utils
+
+
+def returns_from_demos(demos):
+    """
+    Calcula média e desvio padrão dos retornos das demonstrações.
+    Aceita:
+      - lista de objetos Trajectory (com .rews ou comprimento de obs)
+      - lista de dicts com keys 'rews' ou 'obs'
+    Para ambientes como CartPole, se não houver 'rews', assume recompensa 1 por passo.
+    """
+    episode_returns = []
+    for traj in demos:
+        # Trajectory object (imitation.types.Trajectory)
+        if hasattr(traj, "rews") or hasattr(traj, "obs"):
+            # objeto Trajectory
+            rews = getattr(traj, "rews", None)
+            if rews is None:
+                # se não houver rews, assumir 1 por passo
+                obs = getattr(traj, "obs", None)
+                if obs is not None:
+                    episode_returns.append(len(obs))
+                else:
+                    episode_returns.append(0.0)
+            else:
+                episode_returns.append(float(np.sum(rews)))
+        # dict-like trajectory (com 'rews' ou 'obs')
+        elif isinstance(traj, dict):
+            if "rews" in traj and traj["rews"] is not None:
+                episode_returns.append(float(np.sum(traj["rews"])))
+            elif "obs" in traj and traj["obs"] is not None:
+                # assumir recompensa 1 por passo se rews ausentes
+                episode_returns.append(len(traj["obs"]))
+            else:
+                episode_returns.append(0.0)
+        else:
+            # fallback: tentar iterar por passos com 'reward' campo
+            try:
+                total = 0.0
+                for step in traj:
+                    total += step.get("reward", 0.0)
+                episode_returns.append(total)
+            except Exception:
+                episode_returns.append(0.0)
+
+    if len(episode_returns) == 0:
+        return 0.0, 0.0
+    return float(np.mean(episode_returns)), float(np.std(episode_returns))
+
+def trajs_from_imitation_trajectories(expert_list):
+   
+    trajs_dict = []
+    traj_objs = []
+    for traj in expert_list:
+        obs = np.asarray(traj.obs)
+        acts = np.asarray(traj.acts)
+
+        # Se não houver rews, assumir 1 por passo (ex.: CartPole)
+        rews = np.asarray(getattr(traj, "rews", np.ones(len(acts), dtype=float)))
+        dones = np.asarray(getattr(traj, "dones", np.array([False] * len(acts))))
+        infos = getattr(traj, "infos", [{}] * len(acts))
+
+        trajs_dict.append({"obs": obs, "acts": acts, "rews": rews, "dones": dones, "infos": infos})
+
+        # types.Trajectory normalmente aceita obs, acts, infos, terminal
+        traj_obj = types.Trajectory(
+            obs=obs,
+            acts=acts,
+            infos=np.asarray(infos, dtype=object),
+            terminal=bool(getattr(traj, "terminal", True)),
+        )
+        traj_objs.append(traj_obj)
+
+    return trajs_dict, traj_objs
+
+def load_demonstrations(filename):
+    """
+    Carrega demonstrações salvas em um arquivo .pkl
+    """
+    try:
+        with open(filename, "rb") as f:
+            demos = pickle.load(f)
+        print(f"[OK] {len(demos)} demonstrações carregadas de '{filename}'")
+        return demos
+    except FileNotFoundError:
+        print(f"[ERRO] Arquivo '{filename}' não encontrado.")
+        return []
+    except Exception as e:
+        print(f"[ERRO] Falha ao carregar: {e}")
+        return []
 
 def main():
-
     # Argumento de entrada
     parser = argparse.ArgumentParser(description="Treino por Aprendizagem por Imitação")
     parser.add_argument("--file", type=str, required=True, help="Ficheiro com demonstrações (pkl)")
@@ -28,113 +119,116 @@ def main():
     parser.add_argument("--output", type=str, required=True, help="Ficheiro de output da política treinada")
     args = parser.parse_args()
 
+    gym.register(
+        id='Custom-v0',
+        entry_point='custom:Custom',
+        kwargs={'n': 10, 'm': 10, 'num_k': 15, 'max_steps': 100}
+    )
+
     def get_ambiente(type_gym):
         if type_gym == "CartPole":
-            return "seals:seals/CartPole-v0"
+            return "CartPole-v1"
         else:
-            # Com o mesmo id que foi usado para o registo do custom
-            return "custom/custom_enviornment" 
+            return "Custom-v0"
 
     def load_env(seed, type_env, type_algorithm):
-
+        
         if type_algorithm == "BC":
             return make_vec_env(
                 type_env,
                 rng=np.random.default_rng(seed),
                 post_wrappers=[
                     lambda env, _: RolloutInfoWrapper(env)
-                ],  # needed for computing rollouts later
+                ],
             )
-
         elif type_algorithm == "GAIL":
-
-            # n_envs -> Numero de copias do ambiente para acelarar o treino
-
             return make_vec_env(
                 type_env,
                 rng=np.random.default_rng(seed),
                 n_envs=8,
                 post_wrappers=[
                     lambda env, _: RolloutInfoWrapper(env)
-                ],  # needed for computing rollouts later
-        )
+                ],
+            )
         else:
             return None
 
-    """ 
-    Selecionar o tipo de ambiente (CartPole ou Custom)
-    Criar o ambiente
-    Descarregar as demonstrações do expert
-    Treino da policy e guarda no ficherio output
-    """
-
     SEED = 42
+    rng = np.random.default_rng(SEED)
 
     # Selecionar o tipo de ambiente
     type_env = get_ambiente(args.gym)
 
-    # Carregar o ambiente (no GAIL, adicionar n_envs=8,)
+    # Carregar o ambiente
     env = load_env(SEED, type_env, args.algorithm)
 
-    # Descarregar as demonstrações (para ambos os algoritmos)
-    #expert = load_policy(env_name=type_env, venv=env, path=args.file)
-    
-    # Teste da policy (Mudar quando tiver o ambiente custom)
-    expert = load_policy(
-        "ppo-huggingface",
-        organization="HumanCompatibleAI",
-        env_name="seals/CartPole-v0",
-        venv=env,
-    )
+    # Carregar demonstrações
+    expert = load_demonstrations(args.file)
+    print("DEBUG: tipo de expert:", type(expert))
+    if len(expert) > 0:
+        print("DEBUG: exemplo expert[0]:", expert[0])
+    else:
+        print("DEBUG: expert está vazio")
+
+    # Converter demonstrações (objetos Trajectory da imitation) para formatos úteis
+    traj_list_dicts, traj_list_objs = trajs_from_imitation_trajectories(expert)
+
+    # Avaliar retornos das demos (opcional)
+    mean_ret, std_ret = returns_from_demos(traj_list_objs)
+    print(f"Expert demos mean return: {mean_ret} +/- {std_ret}")
 
     if args.algorithm == "BC":
-        # Avaliar a policy através dos dados do expert, dentro de um ambiente env, por 10 episodios
-        reward, _ = evaluate_policy(expert, env, 10)
-        print(reward)
+        # BC espera demonstrações flattenadas (lista de Trajectory objects ou flatten format)
+        demonstrations = rollout_utils.flatten_trajectories(traj_list_objs)
 
-    # Para o GAIL, min_episodes = 60
-    rng = np.random.default_rng(SEED)
-    rollouts = rollout.rollout(
-        expert,
-        env,
-        rollout.make_sample_until(min_timesteps=None, min_episodes=50),
-        rng=rng,
-    )
-
-    if args.algorithm == "BC":
-        
-        print(
-            f"""The `rollout` function generated a list of {len(rollouts)} {type(rollouts[0])}.
-            After flattening, this list is turned into a {type(rollout.flatten_trajectories(rollouts))} object containing {len(rollout.flatten_trajectories(rollouts))} transitions.
-            The transitions object contains arrays for: {', '.join(rollout.flatten_trajectories(rollouts).__dict__.keys())}."
-            """
-            )
+        n_transitions = sum(len(t.obs) for t in traj_list_objs) 
+        print(f"[INFO] Número total de transições nas demos: {n_transitions}") 
+        # escolher demo_batch_size adaptativo (pelo menos 1) 
+        default_batch = 32 
+        demo_batch_size = min(default_batch, max(1, n_transitions))
 
         bc_trainer = BC(
             observation_space=env.observation_space,
             action_space=env.action_space,
-            demonstrations=rollout.flatten_trajectories(rollouts),
-            rng=rng)
-        
-        reward_before_training, _ = evaluate_policy(bc_trainer.policy, env, 5)
+            demonstrations=demonstrations,
+            rng=rng,
+            batch_size=20,        
+        )
+
+        # Avaliar política inicial do BC (pode ser aleatória)
+        try:
+            reward_before_training, _ = evaluate_policy(bc_trainer.policy, env, n_eval_episodes=5)
+            print(f"BC reward before training: {reward_before_training}")
+        except Exception as e:
+            print(f"[WARN] Não foi possível avaliar política antes do treino: {e}")
 
         bc_trainer.train(n_epochs=5)
-                
-        reward_after_training, _ = evaluate_policy(bc_trainer.policy, env, 5)
 
-        print(f"Reward before training: {reward_before_training}")
-        print(f"Reward after training: {reward_after_training}")
+        try:
+            reward_after_training, _ = evaluate_policy(bc_trainer.policy, env, n_eval_episodes=5)
+            print(f"BC reward after training: {reward_after_training}")
+        except Exception as e:
+            print(f"[WARN] Não foi possível avaliar política após o treino: {e}")
 
-        save_policy = PPO( policy=bc_trainer.policy.__class__, env=env, verbose=0, ) 
-        save_policy.policy.load_state_dict(bc_trainer.policy.state_dict()) 
-        save_policy.save(args.output)
-        
+        # Salvar pesos da política (state_dict) como fallback robusto
+        #torch.save(bc_trainer.policy.state_dict(), args.output + ".pt")
+        # Se quiser um ficheiro compatível SB3 (.zip), tente recriar um PPO com a mesma arquitetura e carregar os pesos.
+        try:
+            save_policy = PPO(policy=bc_trainer.policy.__class__, env=env, verbose=0)
+            save_policy.policy.load_state_dict(bc_trainer.policy.state_dict())
+            save_policy.save(args.output)
+            print(f"[OK] Política salva em {args.output}")
+        except Exception as e:
+            print(f"[WARN] Falha ao salvar em formato SB3 (.zip): {e}. State dict salvo em {args.output + '.pt'}")
+
         env.close()
-        
+
     elif args.algorithm == "GAIL":
-        
+        # GAIL aceita lista de trajectórias (dicts ou Trajectory objects). Usamos os objetos Trajectory.
+        rollouts_for_gail = traj_list_objs
+
         learner = PPO(
-            env=env, 
+            env=env,
             policy=MlpPolicy,
             batch_size=64,
             ent_coef=0.0,
@@ -151,36 +245,46 @@ def main():
         )
 
         gail_trainer = GAIL(
-            demonstrations=rollouts,
+            demonstrations=rollouts_for_gail,
             demo_batch_size=1024,
             gen_replay_buffer_capacity=512,
             n_disc_updates_per_round=8,
             venv=env,
             gen_algo=learner,
             reward_net=reward_net,
+            allow_variable_horizon=True,
         )
 
-        env.seed(SEED)
-        learner_rewards_before_training, _ = evaluate_policy(
-        learner, env, 100, return_episode_rewards=True)
+        # Avaliar learner antes do treino adversarial
+        try:
+            learner_rewards_before_training, _ = evaluate_policy(learner, env, 100, return_episode_rewards=True)
+        except Exception as e:
+            print(f"[WARN] Não foi possível avaliar learner antes do treino: {e}")
+            learner_rewards_before_training = []
 
         num_passos = 200000
-
-        gail_trainer.train(num_passos)  # número de passos
+        gail_trainer.train(num_passos)
         learner.save(args.output)
 
-        env.seed(SEED)
-        learner_rewards_after_training, _ = evaluate_policy(learner, env, 100, return_episode_rewards=True)
+        try:
+            learner_rewards_after_training, _ = evaluate_policy(learner, env, 100, return_episode_rewards=True)
+        except Exception as e:
+            print(f"[WARN] Não foi possível avaliar learner após o treino: {e}")
+            learner_rewards_after_training = []
 
-        print(
-            "Rewards before training:", np.mean(learner_rewards_before_training),
-            "+/-", np.std(learner_rewards_before_training),)
+        if len(learner_rewards_before_training) > 0:
+            print(
+                "Rewards before training:", np.mean(learner_rewards_before_training),
+                "+/-", np.std(learner_rewards_before_training),
+            )
+        if len(learner_rewards_after_training) > 0:
+            print(
+                "Rewards after training:", np.mean(learner_rewards_after_training),
+                "+/-", np.std(learner_rewards_after_training),
+            )
 
-        print(
-            "Rewards after training:", np.mean(learner_rewards_after_training),
-            "+/-", np.std(learner_rewards_after_training),
-        )
         env.close()
-            
+
+
 if __name__ == "__main__":
     main()
