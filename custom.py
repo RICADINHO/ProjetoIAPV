@@ -22,16 +22,7 @@ class Custom(gym.Env):
         # acoes: 0 - Up, 1 - Down, 2 - Left, 3 - Right
         self.action_space = spaces.Discrete(4)
 
-        # Observation Space
-        # The agent observes:
-        # 1. Own position (row, col)
-        # 2. Presence of walls/obstacles in contiguous cells (Up, Down, Left, Right) - Binary (0 or 1)
-        # 3. Relative position of the goal (d_row, d_col)
-        # Total vector size: 2 + 4 + 2 = 8
-
-        # Define bounds for observations to ensure compatibility with Stable Baselines3/Imitation
-        # Min values: [0, 0, 0, 0, 0, 0, -n, -m]
-        # Max values: [n, m, 1, 1, 1, 1, n, m]
+        # Espaco de observacoes: propria posicao + obstaculos a volta + posicao do goal
         low = np.array([0, 0, 0, 0, 0, 0, -self.n, -self.m], dtype=np.int32)
         high = np.array([self.n, self.m, 1, 1, 1, 1, self.n, self.m], dtype=np.int32)
 
@@ -70,12 +61,12 @@ class Custom(gym.Env):
                 newpos_k.append(cords)
                 self.pos_k.add(cords)
 
-        observation = self._get_obs()
+        observation = self.get_obs()
         info = {}  # Dicionário vazio de informações adicionais
 
         return observation, info
 
-    def _get_obs(self):
+    def get_obs(self):
         n, m = self.pos_A
 
         # ve se existem pareces em cada acao possivel
@@ -90,6 +81,10 @@ class Custom(gym.Env):
         return np.array([n, m, w_up, w_down, w_left, w_right, dn, dm], dtype=np.int32)
 
     def step(self, action):
+        
+        if isinstance(action, np.ndarray):
+            action = int(action)
+        
         self.step_count += 1
 
         # acoes disponiveis
@@ -120,7 +115,7 @@ class Custom(gym.Env):
         if terminated:
             reward += 10  # reward do objetivo
 
-        observation = self._get_obs()
+        observation = self.get_obs()
         info = {}  # Dicionário vazio de informações adicionais
 
         return observation, reward, terminated, truncated, info
