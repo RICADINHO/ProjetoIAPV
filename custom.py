@@ -95,6 +95,9 @@ class Custom(gym.Env):
             3: (0, 1)  # Right
         }
 
+        # Distancia antiga até ao objetivo
+        old_dist = abs(self.pos_A[0] - self.pos_G[0]) + abs(self.pos_A[1] - self.pos_G[1])
+
         target_n = self.pos_A[0] + next_move[action][0]
         target_m = self.pos_A[1] + next_move[action][1]
         next_pos = (target_n, target_m)
@@ -103,17 +106,27 @@ class Custom(gym.Env):
         in_bounds = (0 <= target_n < self.n) and (0 <= target_m < self.m)
         in_wall = next_pos in self.pos_k
 
-        if in_bounds and not in_wall:
-            self.pos_A = next_pos
+        reward = 0
+
+        if in_bounds and not in_wall: 
+            self.pos_A = next_pos 
+        else: reward -= 5 # penalização forte 
+        # não atualiza posição
+        
+        new_dist = abs(self.pos_A[0] - self.pos_G[0]) + abs(self.pos_A[1] - self.pos_G[1])
+
+        # incentivo por aproximar-se 
+        reward += (old_dist - new_dist) * 0.2 
+        
+        # penalização leve por passo 
+        
+        reward -= 0.1
 
         terminated = (self.pos_A == self.pos_G)
         truncated = (self.step_count >= self.max_steps)
 
-        reward = -1
-        if not in_bounds or in_wall:
-            reward -= 1  # penalizacao de parede/out of bounds
-        if terminated:
-            reward += 10  # reward do objetivo
+        if terminated: 
+            reward += 20 # Recompensa pelo objetivo
 
         observation = self.get_obs()
         info = {}  # Dicionário vazio de informações adicionais

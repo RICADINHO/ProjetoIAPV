@@ -242,7 +242,7 @@ def main():
 
         gail_trainer = GAIL(
             demonstrations=rollouts_for_gail,
-            demo_batch_size=1024,
+            demo_batch_size=512,#1024
             gen_replay_buffer_capacity=512,
             n_disc_updates_per_round=8,
             venv=env,
