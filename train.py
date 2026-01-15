@@ -190,7 +190,7 @@ def main():
             action_space=env.action_space,
             demonstrations=rollouts_for_bc,
             rng=rng,
-            batch_size=20,        
+            batch_size=32,        
         )
 
         # Avaliar política inicial do BC (pode ser aleatória)
@@ -200,7 +200,7 @@ def main():
         except Exception as e:
             print(f"[WARN] Não foi possível avaliar política antes do treino: {e}")
 
-        bc_trainer.train(n_epochs=5)
+        bc_trainer.train(n_epochs=1000)
 
         try:
             reward_after_training, _ = evaluate_policy(bc_trainer.policy, env, n_eval_episodes=5)

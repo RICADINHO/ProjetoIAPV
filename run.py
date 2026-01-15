@@ -21,7 +21,7 @@ def main():
         env = gym.make("CartPole-v0", render_mode="human")
     else:
         # Custom does not accept render_mode in __init__
-        env = gym.make("Custom", render_mode="human")  # substitui pelo teu ID real
+        env = gym.make("Custom")  # substitui pelo teu ID real
 
     # Load Policy
     try:
