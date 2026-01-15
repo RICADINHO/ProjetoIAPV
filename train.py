@@ -181,9 +181,6 @@ def main():
 
         n_transitions = sum(len(t.obs) for t in traj_list_objs) 
         print(f"[INFO] Número total de transições nas demos: {n_transitions}") 
-        # escolher demo_batch_size adaptativo (pelo menos 1) 
-        default_batch = 32 
-        demo_batch_size = min(default_batch, max(1, n_transitions))
 
         bc_trainer = BC(
             observation_space=env.observation_space,
@@ -195,7 +192,7 @@ def main():
 
         # Avaliar política inicial do BC (pode ser aleatória)
         try:
-            reward_before_training, _ = evaluate_policy(bc_trainer.policy, env, n_eval_episodes=5)
+            reward_before_training, _ = evaluate_policy(bc_trainer.policy, env, n_eval_episodes=100)
             print(f"BC reward before training: {reward_before_training}")
         except Exception as e:
             print(f"[WARN] Não foi possível avaliar política antes do treino: {e}")
@@ -203,7 +200,7 @@ def main():
         bc_trainer.train(n_epochs=1000)
 
         try:
-            reward_after_training, _ = evaluate_policy(bc_trainer.policy, env, n_eval_episodes=5)
+            reward_after_training, _ = evaluate_policy(bc_trainer.policy, env, n_eval_episodes=100)
             print(f"BC reward after training: {reward_after_training}")
         except Exception as e:
             print(f"[WARN] Não foi possível avaliar política após o treino: {e}")
@@ -217,11 +214,24 @@ def main():
         except Exception as e:
             print(f"[WARN] Falha ao salvar em formato SB3 (.zip): {e}. State dict salvo em {args.output + '.pt'}")
 
+        print(
+            "Rewards before training (media):", np.mean(reward_before_training),
+            "com uma derivação +/-", np.std(reward_before_training),
+        )
+
+        print(
+            "Rewards after training (media):", np.mean(reward_after_training),
+            "com uma derivação +/-", np.std(reward_after_training),
+        )
+
         env.close()
 
     elif args.algorithm == "GAIL":
         # GAIL aceita lista de trajectórias (dicts ou Trajectory objects). Usamos os objetos Trajectory.
         rollouts_for_gail = traj_list_objs
+
+        n_transitions = sum(len(t.obs) for t in traj_list_objs)
+        print(f"[INFO] Número total de transições nas demos: {n_transitions}") 
 
         learner = PPO(
             env=env,
