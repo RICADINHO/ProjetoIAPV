@@ -12,7 +12,7 @@ def main():
 
     # Selecionar ambiente
     if args.gym == "CartPole":
-        env = gym.make("seals:seals/CartPole-v0", render_mode="human")
+        env = gym.make("CartPole-v0", render_mode="human")
     else:
         env = gym.make("Custom", render_mode="human")  # substitui pelo teu ID real
 

@@ -151,7 +151,7 @@ def collect_demonstrations_manual(env, env_name, num_episodes):
     return trajectories
 
 
-def collect_demonstrations_ppo(env, num_episodes, model_path="ppo-CartPole-v1"):
+def collect_demonstrations_ppo(env, num_episodes, model_path="ppo-CartPole-v0"):
     """
     Coleta demonstrações usando uma policy PPO pré-treinada
     Retorna uma lista de Trajectories compatível com imitation
@@ -256,7 +256,7 @@ def main():
 
     # Criar ambiente
     if args.gym == "CartPole":
-        env = gym.make("CartPole-v1")  # Usar CartPole padrão que termina corretamente
+        env = gym.make("CartPole-v0")  # Usar CartPole padrão que termina corretamente
         env_name = "CartPole"
     else:
         env = gym.make("Custom-v0")

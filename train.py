@@ -1,11 +1,8 @@
 import argparse
 import numpy as np
-import torch
 import gymnasium as gym
 
-from imitation.data import rollout
 from imitation.util.util import make_vec_env
-from imitation.policies.serialize import load_policy
 from imitation.data.wrappers import RolloutInfoWrapper
 from imitation.algorithms.bc import BC
 
@@ -16,7 +13,6 @@ from imitation.util.networks import RunningNorm
 from imitation.rewards.reward_nets import BasicRewardNet
 from stable_baselines3.common.evaluation import evaluate_policy
 
-import custom
 import pickle
 from imitation.data import types
 from imitation.data import rollout as rollout_utils
@@ -68,6 +64,7 @@ def returns_from_demos(demos):
         return 0.0, 0.0
     return float(np.mean(episode_returns)), float(np.std(episode_returns))
 
+# Estruturação dos pares de estado-ação
 def trajs_from_imitation_trajectories(expert_list):
    
     trajs_dict = []
@@ -94,10 +91,9 @@ def trajs_from_imitation_trajectories(expert_list):
 
     return trajs_dict, traj_objs
 
+# Carrega demonstrações salvas em um arquivo .pkl
 def load_demonstrations(filename):
-    """
-    Carrega demonstrações salvas em um arquivo .pkl
-    """
+     
     try:
         with open(filename, "rb") as f:
             demos = pickle.load(f)
@@ -110,6 +106,36 @@ def load_demonstrations(filename):
         print(f"[ERRO] Falha ao carregar: {e}")
         return []
 
+# Selecionar o ambiente que o agente vai treinar a poliica
+def get_ambiente(type_gym):
+    if type_gym == "CartPole":
+        return "CartPole-v0"
+    else:
+        return "Custom-v0"
+
+# Carregar o ambiente escolhido com um algoritmo de imitação
+def load_env(seed, type_env, type_algorithm):
+    
+    if type_algorithm == "BC":
+        return make_vec_env(
+            type_env,
+            rng=np.random.default_rng(seed),
+            post_wrappers=[
+                lambda env, _: RolloutInfoWrapper(env)
+            ],
+        )
+    elif type_algorithm == "GAIL":
+        return make_vec_env(
+            type_env,
+            rng=np.random.default_rng(seed),
+            n_envs=8,
+            post_wrappers=[
+                lambda env, _: RolloutInfoWrapper(env)
+            ],
+        )
+    else:
+        return None
+
 def main():
     # Argumento de entrada
     parser = argparse.ArgumentParser(description="Treino por Aprendizagem por Imitação")
@@ -119,39 +145,10 @@ def main():
     parser.add_argument("--output", type=str, required=True, help="Ficheiro de output da política treinada")
     args = parser.parse_args()
 
+    # Registo do ambiente Custom
     gym.register(
-        id='Custom-v0',
-        entry_point='custom:Custom',
-        kwargs={'n': 10, 'm': 10, 'num_k': 15, 'max_steps': 100}
+        id='Custom-v0', entry_point='custom:Custom', kwargs={'n': 10, 'm': 10, 'num_k': 15, 'max_steps': 100}
     )
-
-    def get_ambiente(type_gym):
-        if type_gym == "CartPole":
-            return "CartPole-v1"
-        else:
-            return "Custom-v0"
-
-    def load_env(seed, type_env, type_algorithm):
-        
-        if type_algorithm == "BC":
-            return make_vec_env(
-                type_env,
-                rng=np.random.default_rng(seed),
-                post_wrappers=[
-                    lambda env, _: RolloutInfoWrapper(env)
-                ],
-            )
-        elif type_algorithm == "GAIL":
-            return make_vec_env(
-                type_env,
-                rng=np.random.default_rng(seed),
-                n_envs=8,
-                post_wrappers=[
-                    lambda env, _: RolloutInfoWrapper(env)
-                ],
-            )
-        else:
-            return None
 
     SEED = 42
     rng = np.random.default_rng(SEED)
@@ -164,6 +161,7 @@ def main():
 
     # Carregar demonstrações
     expert = load_demonstrations(args.file)
+    
     print("DEBUG: tipo de expert:", type(expert))
     if len(expert) > 0:
         print("DEBUG: exemplo expert[0]:", expert[0])
@@ -179,7 +177,7 @@ def main():
 
     if args.algorithm == "BC":
         # BC espera demonstrações flattenadas (lista de Trajectory objects ou flatten format)
-        demonstrations = rollout_utils.flatten_trajectories(traj_list_objs)
+        rollouts_for_bc = rollout_utils.flatten_trajectories(traj_list_objs)
 
         n_transitions = sum(len(t.obs) for t in traj_list_objs) 
         print(f"[INFO] Número total de transições nas demos: {n_transitions}") 
@@ -190,7 +188,7 @@ def main():
         bc_trainer = BC(
             observation_space=env.observation_space,
             action_space=env.action_space,
-            demonstrations=demonstrations,
+            demonstrations=rollouts_for_bc,
             rng=rng,
             batch_size=20,        
         )
@@ -210,13 +208,11 @@ def main():
         except Exception as e:
             print(f"[WARN] Não foi possível avaliar política após o treino: {e}")
 
-        # Salvar pesos da política (state_dict) como fallback robusto
-        #torch.save(bc_trainer.policy.state_dict(), args.output + ".pt")
-        # Se quiser um ficheiro compatível SB3 (.zip), tente recriar um PPO com a mesma arquitetura e carregar os pesos.
         try:
             save_policy = PPO(policy=bc_trainer.policy.__class__, env=env, verbose=0)
             save_policy.policy.load_state_dict(bc_trainer.policy.state_dict())
             save_policy.save(args.output)
+
             print(f"[OK] Política salva em {args.output}")
         except Exception as e:
             print(f"[WARN] Falha ao salvar em formato SB3 (.zip): {e}. State dict salvo em {args.output + '.pt'}")
@@ -274,13 +270,14 @@ def main():
 
         if len(learner_rewards_before_training) > 0:
             print(
-                "Rewards before training:", np.mean(learner_rewards_before_training),
-                "+/-", np.std(learner_rewards_before_training),
+                "Rewards before training (media):", np.mean(learner_rewards_before_training),
+                "com uma derivação +/-", np.std(learner_rewards_before_training),
             )
+
         if len(learner_rewards_after_training) > 0:
             print(
-                "Rewards after training:", np.mean(learner_rewards_after_training),
-                "+/-", np.std(learner_rewards_after_training),
+                "Rewards after training (media):", np.mean(learner_rewards_after_training),
+                "com uma derivação+/-", np.std(learner_rewards_after_training),
             )
 
         env.close()
